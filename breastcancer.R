@@ -1,7 +1,6 @@
 rm(list=ls())
 library(rio)
 library(dplyr)
-library(caret)
 breastCancer=import("WiscBreastCancer.csv")
 summary(breastCancer)
 breastCancer = breastCancer[complete.cases(breastCancer), ]
@@ -20,7 +19,12 @@ train %>%
 test %>% 
   group_by(Class) %>% 
   tally()
-model <- glm(Class~Cl.thickness+Marg.adhesion+Bare.nuclei+Bl.cromatin+Normal.nucleoli,family=binomial,data=train)
+model1 <-glm(Class~.,family=binomial,data=train)
+summary(model1)
+model <- glm(Class~Cl.thickness+Cell.shape
+             +Marg.adhesion+Bare.nuclei
+             +Bl.cromatin+Normal.nucleoli,
+             family=binomial,data=train)
 summary(model)
 anova(model, test="Chisq")
 prediction<- predict(model, test)
@@ -37,3 +41,20 @@ output <- output %>%
 #sum(output$accurate)/nrow(output)
 #confusionMatrix(data = as.numeric(prediction>0.5), reference = output$Class)
 confusionMatrix(as.factor(output$probs),as.factor(output$ClassNo))
+probs1 = probs
+output <- cbind(output, probs1)
+ggplot(output, aes(x=probs1, y=as.numeric(output$ClassNo))) + 
+  geom_point(alpha=.5) +
+  stat_smooth(method="glm", se=FALSE, fullrange=TRUE, 
+              method.args = list(family=binomial)) + 
+  ylab("Cancer")
+
+library(caret)
+highlyCorrelated <- findCorrelation(cor(train[0:8]), cutoff=0.5)
+print(highlyCorrelated)
+
+importance <- varImp(model, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)

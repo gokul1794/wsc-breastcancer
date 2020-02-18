@@ -1,0 +1,153 @@
+---
+title: "Wisconsin Breast Cancer Analysis"
+author: "Gokul Shanth Raveendran"
+date: "2/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Let's load the libraries we will be using
+```{r}
+rm(list=ls())
+library(rio)
+library(dplyr)
+library(caret)
+```
+
+Let's read the dataset into the dataframe.
+```{r}
+breastCancer=import("WiscBreastCancer.csv")
+summary(breastCancer)
+```
+
+On going through the dataset, out of the 699 rows, I could see some rows had NA values in some of the rows. So let's take a look at all the complete cases.
+
+```{r}
+breastCancer = breastCancer[complete.cases(breastCancer), ]
+breastCancer <- subset(breastCancer, select = -c(Id))
+```
+
+The number of observations reduced from 699 to 683, so 16 rows were removed.
+
+```{r}
+breastCancer$Class = as.factor(breastCancer$Class)
+breastCancer %>% 
+  group_by(Class) %>% 
+  tally()
+```
+
+We converted the target variable, that is class into a factor. We can see that there are almost twice the amount of benign classifications than malignant, while the target variable is skewed but only slightly. I don't think we'll need to sample the dataset to take an almost equal number of benign and malignant rows.
+
+```{r}
+set.seed(101) # Set Seed so that same sample can be reproduced
+sample = sample.int(n = nrow(breastCancer), size = floor(.80*nrow(breastCancer)), replace = F)
+train = breastCancer[sample, ]
+test  = breastCancer[-sample, ]
+train %>% 
+  group_by(Class) %>% 
+  tally()
+test %>% 
+  group_by(Class) %>% 
+  tally()
+```
+
+We split the data into 80% train and 20% test.
+
+Let's run a model with all the main effects. Running the model multiple times with different samples showed that the columns that will most affect the model are thickness, cell shape, Marg..adhesion, Bare nuclei, cromatin and nucleoli.
+
+```{r}
+model1 <-glm(Class~.,family=binomial,data=train)
+summary(model1)
+```
+
+So let us make another mode keeping these features in them. Keeping all of them might overfit the model.
+
+```{r}
+model <- glm(Class~Cl.thickness
+             +Marg.adhesion+Bare.nuclei
+             +Bl.cromatin+Normal.nucleoli
+             +Mitoses,
+             family=binomial,data=train)
+summary(model)
+```
+
+In logistic regression the equation can be written as log[p/(1-p)] = b0 + b1*x1 + b2*x2 + ... + bn*xn
+The lhs is called log/odds which reflect the likelihood of the occurence of an event. Odds is the probability of an event divided by the probability that the event will not take place.
+
+All the coefficients are positive, which say that an increase in any of those will increase the probability of tumor beign malignant.
+For example, the cell thickness is 0.74823, then 1 unit of increase in cell thickness will increase the odds of tumour being malignant by exp(0.74823) i.e 2.1 times.
+
+```{r}
+prediction<- predict(model, test)
+probs <- exp(prediction)/(1+exp(prediction))
+output <- cbind(test, probs)
+output <- output %>%
+  mutate(probs = ifelse(probs >0.5,1,0))
+output <- output %>%
+  mutate(ClassNo = ifelse(Class == "malignant",1,0))
+cm <- confusionMatrix(as.factor(output$probs),as.factor(output$ClassNo))
+cm
+cm$byClass["F1"]
+cm$byClass["Precision"] 
+cm$byClass["Recall"] 
+```
+
+In the above code block, we are predicting the probability for each row and calculating the misclassfication rate.
+We can see that the model is 96% accurate. The number of times it predcted benign when it was actually cancerous is 2 and the number of times it predicted cancerous when it was actually not cancerous is 3.
+
+Let us plot the S curve for the regression
+```{r}
+probs1 = probs
+output <- cbind(output, probs1)
+ggplot(output, aes(x=probs1, y=as.numeric(output$ClassNo))) + 
+  geom_point(alpha=.5) +
+  stat_smooth(method="glm", se=FALSE, fullrange=TRUE, 
+              method.args = list(family=binomial)) + 
+  ylab("Cancer")
+```
+
+```{r}
+anova(model, test="Chisq")
+```
+
+```{r}
+library(ROCR)
+library(Metrics)
+pr <- prediction(prediction,output$ClassNo)
+perf <- performance(pr,measure = "tpr",x.measure = "fpr")
+plot(perf)
+auc(output$ClassNo,prediction)
+
+
+```
+
+##Questions
+1. What method will you use for your analysis and why?
+
+Since this is a classification problem, I'm choosing a logistic regression model because my target variable is binary/dichotomus. I simply need to predict if the tumor is benign or malignant.
+
+2. What response (Y) and predictor (X) variables will you use and why?
+
+The Y response is Class - Benign or Malignant
+The X variables chosen are Cl.thickness, Marg.adhesion, Bare.nuclei, Bl.cromatin, Normal.nucleoli, Mitoses. These appear to be most statistically significant when running on a base model.
+
+3.Use a 80:20 split to create a training and test datasets, estimate model parameters from training dataset and examine classification accuracy using the test dataset.
+
+We calculated probability for each row and the misclassfication rate.
+We can see that the model is 96% accurate. The number of times it predcted benign when it was actually cancerous is 2 and the number of times it predicted cancerous when it was actually not cancerous is 3.
+Classification accuracy is also checked with Recall, Precision and F1 scores.
+
+4.How will you interpret the beta coefficients in this model?
+
+All the coefficients are positive, which say that an increase in any of those will increase the probability of tumor beign malignant.
+For example, the cell thickness is 0.74823, then 1 unit of increase in cell thickness will increase the odds of tumour being malignant by exp(0.74823) i.e 2.1 times.
+
+5.How will you estimate model fit?
+
+Using a Chisquare test.
+
+6.Explain which measure of accuracy is most useful in this case and why.
+Recall or F1, but predicting someone's tumor as malignant has a highest cost and thus Recall would be a good measure of accuracy.
